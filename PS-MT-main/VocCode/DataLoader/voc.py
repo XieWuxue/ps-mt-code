@@ -1,0 +1,109 @@
+from Base.base_dataset import BaseDataSet
+from Base.base_dataloader import BaseDataLoader
+
+import numpy as np
+import os
+import torch
+from PIL import Image
+from torch.utils.data import Dataset
+
+
+def get_voc_pallete(num_classes):#获取VOC2012颜色映射
+    n = num_classes
+    pallete = [0] * (n * 3)
+    for j in range(0, n):
+        lab = j
+        pallete[j * 3 + 0] = 0
+        pallete[j * 3 + 1] = 0
+        pallete[j * 3 + 2] = 0
+        i = 0
+        while (lab > 0):
+            pallete[j * 3 + 0] |= (((lab >> 0) & 1) << (7 - i))
+            pallete[j * 3 + 1] |= (((lab >> 1) & 1) << (7 - i))
+            pallete[j * 3 + 2] |= (((lab >> 2) & 1) << (7 - i))
+            i = i + 1
+            lab >>= 3
+    return pallete
+
+
+class VOCDataset(BaseDataSet):#VOC2012数据集
+    def __init__(self, ddp_training, dgx, **kwargs):
+        self.num_classes = 21#VOC2012数据集的类别数
+        self.ignore_index = 255#忽略索引
+        self.ddp_training = ddp_training
+        self.dgx = dgx
+        self.palette = get_voc_pallete(self.num_classes)
+        super(VOCDataset, self).__init__(**kwargs)
+
+    def _set_files(self):
+        # 检查数据目录是否存在
+        if not os.path.exists(self.root):
+            print(f"警告：数据目录 {self.root} 不存在，尝试创建...")
+            os.makedirs(self.root, exist_ok=True)
+        
+        # 构建VOC2012路径
+        voc2012_path = os.path.join(self.root, 'VOCdevkit/VOC2012')
+        self.root = voc2012_path
+        
+        # 检查VOC2012目录是否存在
+        if not os.path.exists(voc2012_path):
+            print(f"错误：VOC2012目录不存在: {voc2012_path}")
+            print("请下载VOC2012数据集并解压到正确位置")
+            print("下载地址: http://host.robots.ox.ac.uk/pascal/VOC/voc2012/VOCtrainval_11-May-2012.tar")
+            print(f"解压到: {os.path.dirname(voc2012_path)}")
+        
+        prefix = "VocCode"
+#if self.dgx else ""
+        if self.split == "val":
+            file_list = os.path.join(prefix, "DataLoader/voc_splits", f"{self.split}" + ".txt")#验证集分割文件
+        elif self.split in ["train_supervised", "train_unsupervised"]:
+            file_list = os.path.join(prefix, "DataLoader/voc_splits", f"{self.n_labeled_examples}_{self.split}" + ".txt")#训练集分割文件    
+        else:
+            raise ValueError(f"Invalid split name {self.split}")
+
+        # 检查分割文件是否存在
+        if not os.path.exists(file_list):
+            # 尝试从当前目录查找
+            alt_path = os.path.join("DataLoader/voc_splits", os.path.basename(file_list))
+            if os.path.exists(alt_path):
+                file_list = alt_path
+            else:
+                raise FileNotFoundError(f"数据分割文件不存在: {file_list}")
+        
+        file_list = [line.rstrip().split(' ') for line in tuple(open(file_list, "r"))]
+        self.files, self.labels = list(zip(*file_list))
+
+    def _load_data(self, index):#加载数据集中的数据
+        image_path = os.path.join(self.root, self.files[index][1:])#图像路径
+        label_path = os.path.join(self.root, self.labels[index][1:])#标签路径
+        image = np.asarray(Image.open(image_path), dtype=np.float32)#加载图像
+        image_id = self.files[index].split("/")[-1].split(".")[0]#图像ID
+        if self.use_weak_lables:#弱标签
+            label_path = os.path.join(self.weak_labels_output, image_id + ".png")
+        else:
+            label_path = os.path.join(self.root, self.labels[index][1:])
+        label = np.asarray(Image.open(label_path), dtype=np.int32)#加载标签
+        return image, label, image_id
+
+
+class VOC(BaseDataLoader):#VOC2012数据集的Data加载器
+    def __init__(self, kwargs, ddp_training=False, dgx=False):
+        self.MEAN = [0.485, 0.456, 0.406]#图像均值
+        self.STD = [0.229, 0.224, 0.225]#图像标准差
+        self.batch_size = kwargs.pop('batch_size')#批量大小
+        kwargs['mean'] = self.MEAN#图像均值
+        kwargs['std'] = self.STD#图像标准差
+        kwargs['ignore_index'] = VOCDataset.ignore_index#忽略索引
+        try:
+            shuffle = kwargs.pop('shuffle')#是否打乱数据
+        except:
+            shuffle = False
+        num_workers = kwargs.pop('num_workers')#数据加载器的线程数
+        self.dataset = VOCDataset(ddp_training, **kwargs, dgx=dgx)
+        if ddp_training:
+            train_sampler = torch.utils.data.distributed.DistributedSampler(self.dataset)
+        else:
+            train_sampler = None
+        super(VOC, self).__init__(self.dataset, self.batch_size, shuffle, num_workers, val_split=None,
+                                  sampler=train_sampler)
+

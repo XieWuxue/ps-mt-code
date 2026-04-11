@@ -1,0 +1,85 @@
+{
+    "name": "PS-MT(VOC12)",
+    "experim_name": "ps-mt-voc-star-map",
+    "description": "PS-MT on Star Map Platform with 92 labeled examples",
+    "platform": "star-map",
+    "author": "xwx",
+    "n_labeled_examples": 92,
+    "ramp_up": 12,
+    "unsupervised_w": 1.5,
+    "ignore_index": 255,
+    "lr_scheduler": "Poly",
+    "use_weak_lables":false,
+    "weakly_loss_w": 0.4,
+
+    "model":{
+        "supervised": false,
+        "semi": true,
+        "resnet": 50,
+        "sup_loss": "CE",
+        "un_loss": "semi_ce",
+        "warm_up_epoch": 0
+    },
+
+
+    "optimizer": {
+        "type": "SGD",
+        "args":{
+            "lr": 1e-2,
+            "weight_decay": 1e-4,
+            "momentum": 0.9
+        }
+    },
+
+
+    "train_supervised": {
+        "data_dir": "./data",
+        "batch_size": 2,         
+
+        "crop_size": 256,       
+        "shuffle": true,
+        "base_size": 300,         
+        "scale": true,
+        "augment": true,
+        "flip": true,
+        "rotate": false,
+        "split": "train_supervised",
+        "num_workers": 2        
+    },
+
+    "train_unsupervised": {
+        "data_dir": "./data",
+        "weak_labels_output": "./pseudo_labels/result/pseudo_labels",
+        "batch_size": 2,        
+        "crop_size": 256,     
+        "shuffle": true,
+        "base_size": 300,          
+        "scale": true,
+        "augment": true,
+        "flip": true,
+        "rotate": false,
+        "split": "train_unsupervised",
+        "num_workers": 2          
+    },
+
+    "val_loader": {
+        "data_dir": "./data",
+        "batch_size": 1,
+        "val": true,
+        "split": "val",
+        "shuffle": false,
+        "num_workers": 2           
+    },
+
+    "trainer": {
+        "epochs": 5,
+        "save_dir": "saved/",
+        "save_period": 1,
+        "log_dir": "saved/",
+        "log_per_iter": 20,
+        "val": true,
+        "val_per_epochs": 1,
+        "gamma": 0.5,
+        "sharp_temp": 0.5
+    }
+}
