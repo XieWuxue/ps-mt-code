@@ -2,7 +2,7 @@ import os
 import sys
 import random
 import warnings
-import argparse
+import argparse#命令行解析参数
 import site
 
 # 自动添加用户site-packages目录（跨平台兼容）
@@ -13,8 +13,8 @@ if os.path.exists(user_site):
 from train import Trainer
 from Utils.losses import *
 from DataLoader.voc import VOC
-import torch.distributed as dist
-import torch.multiprocessing as mp
+import torch.distributed as dist#分布式训练
+import torch.multiprocessing as mp#多进程训练
 from Utils.tensor_board import Tensorboard
 from Model.Deeplabv3_plus.EntireModel import EntireModel as model_deep
 
@@ -24,7 +24,7 @@ warnings.filterwarnings("ignore")
 # from Model.PSPNet.EntireModel import EntireModel as model_psp
 
 
-def main(gpu,  ngpus_per_node, config, args):
+def main(gpu,  ngpus_per_node, config, args):#config,一个字典，包含模型的超参数；args,一个对象，包含命令行解析的参数
     args.local_rank = gpu
     if args.local_rank <= 0:
         logger = logging.getLogger("PS-MT")
@@ -71,21 +71,21 @@ def main(gpu,  ngpus_per_node, config, args):
             #                             'resnet{}.pth'.format(str(args.backbone)))
             #     dist.barrier()
 
-    random.seed(42)
+    random.seed(42)#固定随机种子
     torch.manual_seed(42)
     torch.cuda.manual_seed_all(42)
     torch.backends.cudnn.benchmark = True
     # DATA LOADERS
     config['train_supervised']['n_labeled_examples'] = config['n_labeled_examples']
-    config['train_unsupervised']['n_labeled_examples'] = config['n_labeled_examples']
-    config['train_unsupervised']['use_weak_lables'] = config['use_weak_lables']
+    config['train_unsupervised']['n_labeled_examples'] = config['n_labeled_examples']#有标签数据
+    config['train_unsupervised']['use_weak_lables'] = config['use_weak_lables']#是否使用弱标签
 
-    supervised_loader = VOC(config['train_supervised'], ddp_training=args.ddp, dgx=args.dgx)
-    unsupervised_loader = VOC(config['train_unsupervised'], ddp_training=args.ddp, dgx=args.dgx)
+    supervised_loader = VOC(config['train_supervised'], ddp_training=args.ddp, dgx=args.dgx)#取出有标签数据的加载器，学习
+    unsupervised_loader = VOC(config['train_unsupervised'], ddp_training=args.ddp, dgx=args.dgx)#取出无标签数据的加载器，辅助学习
 
-    val_loader = VOC(config['val_loader'], dgx=args.dgx)
+    val_loader = VOC(config['val_loader'], dgx=args.dgx)#取出验证集的加载器，评估
 
-    iter_per_epoch = len(unsupervised_loader)
+    iter_per_epoch = len(unsupervised_loader)#epoch的迭代次数
 
     # SUPERVISED LOSS
     if config['model']['sup_loss'] == 'CE':
@@ -93,8 +93,8 @@ def main(gpu,  ngpus_per_node, config, args):
     else:
         raise NotImplementedError
 
-    cons_w_unsup = ConsistencyWeight(final_w=config['unsupervised_w'], iters_per_epoch=len(unsupervised_loader),
-                                     rampup_starts=0, rampup_ends=config['ramp_up'],  ramp_type="cosine_rampup")
+    cons_w_unsup = ConsistencyWeight(final_w=config['unsupervised_w'], iters_per_epoch=len(unsupervised_loader),#一致性权重
+                                     rampup_starts=0, rampup_ends=config['ramp_up'],  ramp_type="cosine_rampup")#预热
     if args.architecture == "psp":
         assert "Code will be uploaded soon."
 
@@ -113,7 +113,7 @@ def main(gpu,  ngpus_per_node, config, args):
     if args.local_rank <= 0:
         wandb_run = Tensorboard(config=config, online=False)
 
-    trainer = Trainer(model=model,
+    trainer = Trainer(model=model,#神经网络
                       config=config,
                       supervised_loader=supervised_loader,
                       unsupervised_loader=unsupervised_loader,
@@ -130,7 +130,7 @@ def main(gpu,  ngpus_per_node, config, args):
 
 if __name__ == '__main__':
     # PARSE THE ARGS
-    parser = argparse.ArgumentParser(description='PyTorch Training')
+    parser = argparse.ArgumentParser(description='PyTorch Training')#记录
     parser.add_argument('-n', '--nodes', default=1,
                         type=int, metavar='N')
 
@@ -173,7 +173,7 @@ if __name__ == '__main__':
     parser.add_argument('--semi_p_th', type=float, default=0.6,
                         help='positive_threshold for semi-supervised loss')
     
-    parser.add_argument('--semi_n_th', type=float, default=0.6,
+    parser.add_argument('--semi_n_th', type=float, default=0.6,#阈值
                         help='negative_threshold for semi-supervised loss')
 
     parser.add_argument('--unsup_weight', type=float, default=1.5,
@@ -181,7 +181,7 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    args.world_size = args.gpus * args.nodes
+    args.world_size = args.gpus * args.nodes#显卡*节点=总显卡数
     args.ddp = True if args.gpus > 1 else False
 
     if args.architecture == "psp":
@@ -203,10 +203,10 @@ if __name__ == '__main__':
     config['optimizer']['args']['lr'] = args.learning_rate
     config['unsupervised_w'] = args.unsup_weight
 
-    if args.ddp:
+    if args.ddp:#多卡训练的调整
         os.environ['MASTER_ADDR'] = '127.0.0.1'
         os.environ['MASTER_PORT'] = '9901'
-        config['optimizer']['args']['lr'] = config['optimizer']['args']['lr'] * args.world_size
+        config['optimizer']['args']['lr'] = config['optimizer']['args']['lr'] * args.world_size#学习率和显卡数目相关
         if args.dgx is True:
             config['train_supervised']['batch_size'] = int(32/args.gpus)
             config['train_unsupervised']['batch_size'] = int(32/args.gpus)
